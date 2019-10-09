@@ -2,7 +2,8 @@ import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { User } from '../interfaces/user';
 import { UserService } from '../services/user.service';
-import { THIS_EXPR } from '@angular/compiler/src/output/output_ast';
+import { AuthenticationService } from '../services/authentication.service';
+import { ConversationService } from '../services/conversation.service';
 
 @Component({
   selector: 'app-conversation',
@@ -11,21 +12,112 @@ import { THIS_EXPR } from '@angular/compiler/src/output/output_ast';
 })
 export class ConversationComponent implements OnInit {
   friendId: any;
-  friends: User[];
   friend: User;
-  price: number = 78.234589654152;
-  today: any = Date.now();
-  constructor(private activatedRoute: ActivatedRoute, private userService: UserService) {
+  user: User;
+  conversation_id: string;
+  textMessage: string;
+  conversation: any[];
+  shake: boolean = false;
+  constructor(
+    private activatedRoute: ActivatedRoute,
+    private userService: UserService,
+    private conversationService: ConversationService,
+    private authenticationService: AuthenticationService
+  ) {
     this.friendId = this.activatedRoute.snapshot.params['uid'];
     console.log(this.friendId);
-
-    this.friends = userService.getFriends();
-
-    this.friend = this.friends.find(record => {
-      return record.uid == this.friendId;
+    this.authenticationService.getStatus().subscribe(session => {
+      this.userService
+        .getUserById(session.uid)
+        .valueChanges()
+        .subscribe((user: User) => {
+          this.user = user;
+          this.userService
+            .getUserById(this.friendId)
+            .valueChanges()
+            .subscribe(
+              (data: User) => {
+                this.friend = data;
+                const ids = [this.user.uid, this.friend.uid].sort();
+                this.conversation_id = ids.join('|');
+              },
+              error => {
+                console.log(error);
+              }
+            );
+        });
     });
-    console.log(this.friend);
   }
 
   ngOnInit() {}
+
+  sendMessage() {
+    const message = {
+      uid: this.conversation_id,
+      timestamp: Date.now(),
+      text: this.textMessage,
+      sender: this.user.uid,
+      receiver: this.friend.uid,
+      type: 'text'
+    };
+    this.conversationService.createConversation(message).then(() => {
+      this.textMessage = '';
+    });
+  }
+
+  sendZumbido() {
+    const message = {
+      uid: this.conversation_id,
+      timestamp: Date.now(),
+      text: null,
+      sender: this.user.uid,
+      receiver: this.friend.uid,
+      type: 'zumbido'
+    };
+    this.conversationService.createConversation(message).then(() => {});
+    this.doZumbido();
+  }
+
+  doZumbido() {
+    const audio = new Audio('assets/sound/zumbido.m4a');
+    audio.play();
+    this.shake = true;
+    window.setTimeout(() => {
+      this.shake = false;
+    }, 1000);
+  }
+
+  getConversation() {
+    this.conversationService
+      .getConvesation(this.conversation_id)
+      .valueChanges()
+      .subscribe(
+        data => {
+          this.conversation = data;
+          this.conversation.forEach(message => {
+            if (!message.seen) {
+              message.seen = true;
+              this.conversationService.editConversation(message);
+              if (message.type == 'text') {
+                const audio = new Audio('assets/sound/new_message.m4a');
+                audio.play();
+              } else if (message.type == 'zumbido') {
+                this.doZumbido();
+              }
+            }
+          });
+          console.log(data);
+        },
+        error => {
+          console.log(error);
+        }
+      );
+  }
+  getUserNickById(id) {
+    if (id === this.friend.uid) {
+      return this.friend.nick;
+    } else {
+      return this.user.nick;
+    }
+  }
 }
